@@ -1,23 +1,23 @@
 #include <SoftwareSerial.h>
 
+#define NUMBER_OF_SENSORS 4
+
 #define RX_PIN_SENSOR_0 13
 #define RX_PIN_SENSOR_1 12
 #define RX_PIN_SENSOR_2 14
 #define RX_PIN_SENSOR_3 27
 
 #define TONE_PIN 32
-
-#define NUMBER_OF_SENSORS 4
+#define BASE_TONE 750
 
 #define ERROR_DISTANCE 6016
+#define MIN_DISTANCE 300
+#define MAX_DISTANCE 2000
 
 #define FIRST_BYTE 0xFF
 
-static const unsigned char SENSOR_READING_LOOPS = 5;
-
 char sensorsData[NUMBER_OF_SENSORS][3];
 
-unsigned char sensorReadingLoop = SENSOR_READING_LOOPS;
 uint16_t latestSensorsDistance[NUMBER_OF_SENSORS] = {9999, 9999, 9999, 9999};
 bool atMinDistance = false;
 
@@ -48,10 +48,12 @@ void loop()
   }
 
   unsigned long currentTime = millis();
-  if (currentTime - previousTime > (SENSOR_READING_LOOPS / 2) * 75)
+  if (currentTime - previousTime > 500)
   {
     produceTone();
     previousTime = currentTime;
+
+    Serial.printf("S0: %dmm   S1: %dmm   S2: %dmm   S3: %dmm\n", latestSensorsDistance[0], latestSensorsDistance[1], latestSensorsDistance[2], latestSensorsDistance[3]);
   }
 }
 
@@ -74,25 +76,25 @@ void processSensorData(EspSoftwareSerial::UART *sensor, char *data, uint16_t *la
 
 void produceTone()
 {
-  sensorReadingLoop = min(SENSOR_READING_LOOPS, sensorReadingLoop);
-  sensorReadingLoop--;
+  uint16_t minSensorDistance = 9999;
 
-  if (sensorReadingLoop)
-    return;
+  for (unsigned char i = 0; i < NUMBER_OF_SENSORS; i++)
+    if (minSensorDistance > latestSensorsDistance[i])
+      minSensorDistance = latestSensorsDistance[i];
 
-  uint16_t meaningfull_distance = constrain(latestSensorsDistance[0], 300, 2000);
-  uint16_t toneValue = 750 - meaningfull_distance / 50;
-  if (meaningfull_distance == 300 && !atMinDistance)
+  uint16_t constrainedMinSensorDistance = constrain(minSensorDistance, MIN_DISTANCE, MAX_DISTANCE);
+  uint16_t toneValue = BASE_TONE - constrainedMinSensorDistance / 50;
+  if (constrainedMinSensorDistance == MIN_DISTANCE && !atMinDistance)
   {
     atMinDistance = true;
     tone(TONE_PIN, toneValue);
   }
-  else if (meaningfull_distance > 300 && atMinDistance)
+  else if (constrainedMinSensorDistance > MIN_DISTANCE && atMinDistance)
   {
     atMinDistance = false;
     noTone(TONE_PIN);
   }
 
-  if (meaningfull_distance > 300 && !atMinDistance)
-    tone(TONE_PIN, toneValue, map(meaningfull_distance, 300, 2000, 80 * (SENSOR_READING_LOOPS + 1) + 25, 25));
+  if (constrainedMinSensorDistance > MIN_DISTANCE && !atMinDistance)
+    tone(TONE_PIN, toneValue, map(constrainedMinSensorDistance, MIN_DISTANCE, MAX_DISTANCE, 450, 25));
 }
