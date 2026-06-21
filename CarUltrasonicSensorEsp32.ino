@@ -3,8 +3,8 @@
 #define NUMBER_OF_SENSORS 4
 
 #define RX_PIN_SENSOR_0 13
-#define RX_PIN_SENSOR_1 12
-#define RX_PIN_SENSOR_2 14
+#define RX_PIN_SENSOR_1 26
+#define RX_PIN_SENSOR_2 25
 #define RX_PIN_SENSOR_3 27
 
 #define TONE_PIN 32
@@ -29,10 +29,18 @@ void setup()
 {
   Serial.begin(115200);
 
-  sensors[0].begin(9600, EspSoftwareSerial::SWSERIAL_8N1, RX_PIN_SENSOR_0, -1);
-  sensors[1].begin(9600, EspSoftwareSerial::SWSERIAL_8N1, RX_PIN_SENSOR_1, -1);
-  sensors[2].begin(9600, EspSoftwareSerial::SWSERIAL_8N1, RX_PIN_SENSOR_2, -1);
-  sensors[3].begin(9600, EspSoftwareSerial::SWSERIAL_8N1, RX_PIN_SENSOR_3, -1);
+  sensors[0].begin(9600, EspSoftwareSerial::SWSERIAL_8N1, RX_PIN_SENSOR_0, -1, false, 4);
+  sensors[0].enableIntTx(false);
+  sensors[0].enableTx(false);
+  sensors[1].begin(9600, EspSoftwareSerial::SWSERIAL_8N1, RX_PIN_SENSOR_1, -1, false, 4);
+  sensors[1].enableIntTx(false);
+  sensors[1].enableTx(false);
+  sensors[2].begin(9600, EspSoftwareSerial::SWSERIAL_8N1, RX_PIN_SENSOR_2, -1, false, 4);
+  sensors[2].enableIntTx(false);
+  sensors[2].enableTx(false);
+  sensors[3].begin(9600, EspSoftwareSerial::SWSERIAL_8N1, RX_PIN_SENSOR_3, -1, false, 4);
+  sensors[3].enableIntTx(false);
+  sensors[3].enableTx(false);
 
   sleep(1);
 }
