@@ -1,6 +1,8 @@
 #include <SimpleKalmanFilter.h>
 #include <SoftwareSerial.h>
 
+#define DEBUG 1
+
 #define NUMBER_OF_SENSORS 4
 
 #define HW_RX_0 13
@@ -15,6 +17,7 @@
 
 #define TONE_PIN 32
 #define BASE_TONE 750
+#define BEEP_PULSE_MS 20
 
 #define MIN_DISTANCE 300
 #define MAX_DISTANCE 2000
@@ -22,20 +25,23 @@
 #define FIRST_BYTE 0xFF
 #define TRIGGER_BYTE 0x01
 
-uint16_t latestSensorsDistance[NUMBER_OF_SENSORS] = {9999, 9999, 9999, 9999};
-bool atMinDistance = false;
+volatile uint16_t latestSensorsDistance[NUMBER_OF_SENSORS] = {MAX_DISTANCE, MAX_DISTANCE, MAX_DISTANCE, MAX_DISTANCE};
 
 EspSoftwareSerial::UART swSensors[2];
 
 SimpleKalmanFilter kalman[NUMBER_OF_SENSORS] = {
-    SimpleKalmanFilter(30, 30, 0.5),
-    SimpleKalmanFilter(30, 30, 0.5),
-    SimpleKalmanFilter(30, 30, 0.5),
-    SimpleKalmanFilter(30, 30, 0.5)};
+    SimpleKalmanFilter(30, 30, 0.3),
+    SimpleKalmanFilter(30, 30, 0.3),
+    SimpleKalmanFilter(30, 30, 0.3),
+    SimpleKalmanFilter(30, 30, 0.3)};
+
+TaskHandle_t ToneTaskHandle;
 
 void setup()
 {
+#if DEBUG
   Serial.begin(115200);
+#endif
 
   Serial1.begin(9600, SERIAL_8N1, HW_RX_0, HW_TX_0);
   Serial2.begin(9600, SERIAL_8N1, HW_RX_1, HW_TX_1);
@@ -44,6 +50,15 @@ void setup()
   swSensors[1].begin(9600, EspSoftwareSerial::SWSERIAL_8N1, SW_RX_3, SW_TX_3, false, 64);
 
   delay(1000);
+
+  xTaskCreatePinnedToCore(
+      produceTone,
+      "ToneTask",
+      2048,
+      NULL,
+      1,
+      &ToneTaskHandle,
+      0);
 }
 
 void loop()
@@ -89,10 +104,11 @@ void loop()
     delay(100 + detectionWindowRemainder);
   }
 
-  produceTone();
+#if DEBUG
   Serial.printf("S0 (HW): %dmm   S1 (HW): %dmm   S2 (SW): %dmm   S3 (SW): %dmm\n",
                 latestSensorsDistance[0], latestSensorsDistance[1],
                 latestSensorsDistance[2], latestSensorsDistance[3]);
+#endif
 }
 
 void triggerSensor(uint8_t id)
@@ -172,33 +188,43 @@ void parseSensorPacket(uint8_t id)
   if (calculatedChecksum == (uint8_t)data[2])
   {
     uint16_t sensorDistance = ((uint16_t)(uint8_t)data[0] << 8) + (uint8_t)data[1];
-    
+
     uint16_t targetDistance = constrain(sensorDistance, MIN_DISTANCE, MAX_DISTANCE);
 
     latestSensorsDistance[id] = (uint16_t)kalman[id].updateEstimate(targetDistance);
   }
 }
 
-void produceTone()
+void produceTone(void *pvParameters)
 {
-  uint16_t minSensorDistance = 9999;
-
-  for (unsigned char id = 0; id < NUMBER_OF_SENSORS; id++)
-    if (minSensorDistance > latestSensorsDistance[id])
-      minSensorDistance = latestSensorsDistance[id];
-
-  uint16_t toneValue = BASE_TONE - minSensorDistance / 30;
-  if (minSensorDistance == MIN_DISTANCE && !atMinDistance)
+  bool atMinDistance = false;
+  for (;;)
   {
-    atMinDistance = true;
-    tone(TONE_PIN, toneValue);
-  }
-  else if (minSensorDistance > MIN_DISTANCE && atMinDistance)
-  {
-    atMinDistance = false;
-    noTone(TONE_PIN);
-  }
+    uint16_t minSensorDistance = MAX_DISTANCE;
 
-  if (minSensorDistance > MIN_DISTANCE && !atMinDistance)
-    tone(TONE_PIN, toneValue, map(minSensorDistance, MIN_DISTANCE, MAX_DISTANCE, 550, 10));
+    for (unsigned char id = 0; id < NUMBER_OF_SENSORS; id++)
+      if (minSensorDistance > latestSensorsDistance[id])
+        minSensorDistance = latestSensorsDistance[id];
+
+    uint16_t toneValue = BASE_TONE - minSensorDistance / 30;
+
+    if (minSensorDistance == MIN_DISTANCE && !atMinDistance)
+    {
+      atMinDistance = true;
+      tone(TONE_PIN, toneValue);
+      vTaskDelay(20 / portTICK_PERIOD_MS);
+    }
+    else if (minSensorDistance > MIN_DISTANCE && atMinDistance)
+    {
+      atMinDistance = false;
+      noTone(TONE_PIN);
+    }
+
+    if (minSensorDistance > MIN_DISTANCE && !atMinDistance)
+    {
+      tone(TONE_PIN, toneValue, BEEP_PULSE_MS);
+      uint32_t silenceIntervalMs = map(minSensorDistance, MIN_DISTANCE, MAX_DISTANCE, 30, 500);
+      vTaskDelay((BEEP_PULSE_MS + silenceIntervalMs) / portTICK_PERIOD_MS);
+    }
+  }
 }
