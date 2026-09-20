@@ -16,19 +16,16 @@
 #define TONE_PIN 32
 #define BASE_TONE 750
 
-#define ERROR_DISTANCE 6016
 #define MIN_DISTANCE 300
 #define MAX_DISTANCE 2000
 
 #define FIRST_BYTE 0xFF
 #define TRIGGER_BYTE 0x01
 
-char sensorsData[NUMBER_OF_SENSORS][3];
 uint16_t latestSensorsDistance[NUMBER_OF_SENSORS] = {9999, 9999, 9999, 9999};
 bool atMinDistance = false;
 
 EspSoftwareSerial::UART swSensors[2];
-unsigned long previousTelemetryTime = 0;
 
 SimpleKalmanFilter kalman[NUMBER_OF_SENSORS] = {
     SimpleKalmanFilter(30, 30, 0.5),
@@ -51,34 +48,41 @@ void setup()
 
 void loop()
 {
-  for (uint8_t i = 0; i < NUMBER_OF_SENSORS; i++)
+  for (uint8_t id = 0; id < NUMBER_OF_SENSORS; id++)
   {
-    clearSerialBuffer(i);
+    clearSerialBuffer(id);
 
-    triggerSensor(i);
+    triggerSensor(id);
 
     unsigned long startTime = millis();
     unsigned long timeSpentReading = 0;
+    bool packetFound = false;
 
     while ((timeSpentReading = (millis() - startTime)) < 40)
     {
-      if (isDataAvailable(i))
+      if (isDataAvailable(id))
       {
-        if (peekSerialByte(i) == FIRST_BYTE)
+        if (peekSerialByte(id) == FIRST_BYTE)
         {
           delay(5);
-          if (getAvailableBytes(i) >= 4)
+          if (getAvailableBytes(id) >= 4)
           {
-            parseSensorPacket(i);
+            parseSensorPacket(id);
+            packetFound = true;
             break;
           }
         }
         else
         {
-          readSerialByte(i);
+          readSerialByte(id);
         }
       }
       yield();
+    }
+
+    if (!packetFound)
+    {
+      latestSensorsDistance[id] = (uint16_t)kalman[id].updateEstimate(MAX_DISTANCE);
     }
 
     unsigned long detectionWindowRemainder = 40 - timeSpentReading;
@@ -168,10 +172,10 @@ void parseSensorPacket(uint8_t id)
   if (calculatedChecksum == (uint8_t)data[2])
   {
     uint16_t sensorDistance = ((uint16_t)(uint8_t)data[0] << 8) + (uint8_t)data[1];
-    if (sensorDistance != ERROR_DISTANCE)
-    {
-      latestSensorsDistance[id] = (uint16_t)kalman[id].updateEstimate(sensorDistance);
-    }
+    
+    uint16_t targetDistance = constrain(sensorDistance, MIN_DISTANCE, MAX_DISTANCE);
+
+    latestSensorsDistance[id] = (uint16_t)kalman[id].updateEstimate(targetDistance);
   }
 }
 
@@ -179,23 +183,22 @@ void produceTone()
 {
   uint16_t minSensorDistance = 9999;
 
-  for (unsigned char i = 0; i < NUMBER_OF_SENSORS; i++)
-    if (minSensorDistance > latestSensorsDistance[i])
-      minSensorDistance = latestSensorsDistance[i];
+  for (unsigned char id = 0; id < NUMBER_OF_SENSORS; id++)
+    if (minSensorDistance > latestSensorsDistance[id])
+      minSensorDistance = latestSensorsDistance[id];
 
-  uint16_t constrainedMinSensorDistance = constrain(minSensorDistance, MIN_DISTANCE, MAX_DISTANCE);
-  uint16_t toneValue = BASE_TONE - constrainedMinSensorDistance / 30;
-  if (constrainedMinSensorDistance == MIN_DISTANCE && !atMinDistance)
+  uint16_t toneValue = BASE_TONE - minSensorDistance / 30;
+  if (minSensorDistance == MIN_DISTANCE && !atMinDistance)
   {
     atMinDistance = true;
     tone(TONE_PIN, toneValue);
   }
-  else if (constrainedMinSensorDistance > MIN_DISTANCE && atMinDistance)
+  else if (minSensorDistance > MIN_DISTANCE && atMinDistance)
   {
     atMinDistance = false;
     noTone(TONE_PIN);
   }
 
-  if (constrainedMinSensorDistance > MIN_DISTANCE && !atMinDistance)
-    tone(TONE_PIN, toneValue, map(constrainedMinSensorDistance, MIN_DISTANCE, MAX_DISTANCE, 550, 10));
+  if (minSensorDistance > MIN_DISTANCE && !atMinDistance)
+    tone(TONE_PIN, toneValue, map(minSensorDistance, MIN_DISTANCE, MAX_DISTANCE, 550, 10));
 }
